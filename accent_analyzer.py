@@ -237,9 +237,50 @@ class AccentAnalyzer:
                 
                 return output_path
             
-            # For YouTube URLs, use yt-dlp with specific format
+            # For YouTube URLs, first get available formats
             ydl_opts = {
-                'format': 'best[ext=mp4]/best',  # Prefer MP4 format
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    raise Exception("Could not extract video information")
+                
+                formats = info.get('formats', [])
+                if not formats:
+                    raise Exception("No formats available for this video")
+                
+                # Log available formats
+                logger.info("Available formats:")
+                for f in formats:
+                    logger.info(f"Format: {f.get('format_id')} - {f.get('ext')} - {f.get('format_note')} - {f.get('resolution')}")
+                
+                # Find a suitable format
+                suitable_format = None
+                for f in formats:
+                    if f.get('ext') == 'mp4' and f.get('format_note') == '720p':
+                        suitable_format = f.get('format_id')
+                        break
+                
+                if not suitable_format:
+                    # Fallback to any mp4 format
+                    for f in formats:
+                        if f.get('ext') == 'mp4':
+                            suitable_format = f.get('format_id')
+                            break
+                
+                if not suitable_format:
+                    # Last resort: use the first available format
+                    suitable_format = formats[0].get('format_id')
+                
+                logger.info(f"Selected format: {suitable_format}")
+            
+            # Now download with the selected format
+            ydl_opts = {
+                'format': suitable_format,
                 'outtmpl': output_path,
                 'quiet': True,
                 'no_warnings': True,
@@ -247,36 +288,20 @@ class AccentAnalyzer:
                     'key': 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4',
                 }],
-                'ffmpeg_location': self.ffmpeg_path,  # Use found ffmpeg path
+                'ffmpeg_location': self.ffmpeg_path,
                 'merge_output_format': 'mp4',
-                'verbose': True  # Enable verbose output for debugging
+                'verbose': True
             }
             
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # First try to get video info
-                    info = ydl.extract_info(url, download=False)
-                    logger.info(f"Available formats: {[f['format_id'] for f in info['formats']]}")
-                    
-                    # Download the video
-                    ydl.download([url])
-                    
-                    # Verify the file was downloaded
-                    if os.path.exists(output_path):
-                        logger.info(f"Successfully downloaded video to {output_path}")
-                        return output_path
-                    else:
-                        raise Exception("Video file not found after download")
-                        
-            except Exception as e:
-                logger.error(f"Error downloading video: {str(e)}")
-                # Try alternative format if first attempt fails
-                ydl_opts['format'] = 'best'
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-                    if os.path.exists(output_path):
-                        return output_path
-                    raise Exception(f"Failed to download video after retry: {str(e)}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+                
+                # Verify the file was downloaded
+                if os.path.exists(output_path):
+                    logger.info(f"Successfully downloaded video to {output_path}")
+                    return output_path
+                else:
+                    raise Exception("Video file not found after download")
                     
         except Exception as e:
             logger.error(f"Error in download_video: {str(e)}")
