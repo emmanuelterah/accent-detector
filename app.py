@@ -5,12 +5,17 @@ from pathlib import Path
 import logging
 import base64
 import asyncio
+import nest_asyncio
+
+# Apply nest_asyncio to allow nested event loops
+nest_asyncio.apply()
 
 # Fix for Streamlit event loop
 try:
-    asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
 except RuntimeError:
-    asyncio.set_event_loop(asyncio.new_event_loop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -153,7 +158,7 @@ def initialize_analyzer():
         return AccentAnalyzer()
     except Exception as e:
         logger.error(f"Error initializing analyzer: {str(e)}")
-        st.error("Failed to initialize the accent analyzer. Please try refreshing the page.")
+        st.error(f"Failed to initialize the accent analyzer: {str(e)}")
         return None
 
 def main():

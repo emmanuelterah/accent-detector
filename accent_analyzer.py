@@ -5,6 +5,7 @@ import torch
 import yt_dlp
 import subprocess
 import logging
+import shutil
 from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
 import soundfile as sf
 import librosa
@@ -21,7 +22,29 @@ logger = logging.getLogger(__name__)
 
 # Constants
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "model_cache")
+TEMP_DIR = os.path.join(os.path.dirname(__file__), "temp")
 os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+def find_ffmpeg():
+    """Find FFmpeg executable in system PATH or common installation locations."""
+    # Check if ffmpeg is in PATH
+    ffmpeg_path = shutil.which('ffmpeg')
+    if ffmpeg_path:
+        return ffmpeg_path
+        
+    # Check common installation locations
+    common_paths = [
+        r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
+        r'C:\ffmpeg\bin\ffmpeg.exe',
+        r'C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe'
+    ]
+    
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+            
+    return None
 
 class AccentAnalyzer:
     _instance = None
@@ -38,6 +61,12 @@ class AccentAnalyzer:
                 # Set device
                 self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 logger.info(f"Using device: {self.device}")
+                
+                # Find FFmpeg
+                self.ffmpeg_path = find_ffmpeg()
+                if not self.ffmpeg_path:
+                    raise Exception("FFmpeg not found. Please install FFmpeg and ensure it's in your system PATH.")
+                logger.info(f"Found FFmpeg at: {self.ffmpeg_path}")
                 
                 # Initialize models
                 self._initialize_models()
@@ -184,11 +213,11 @@ class AccentAnalyzer:
         """Download video from URL (YouTube or Google Drive) and return local path."""
         try:
             # Create temp directory if it doesn't exist
-            os.makedirs(self.temp_dir, exist_ok=True)
+            os.makedirs(TEMP_DIR, exist_ok=True)
             
             # Generate a unique filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = os.path.join(self.temp_dir, f"video_{timestamp}.mp4")
+            output_path = os.path.join(TEMP_DIR, f"video_{timestamp}.mp4")
             
             # Check if it's a Google Drive URL
             if self.is_google_drive_url(url):
@@ -218,7 +247,7 @@ class AccentAnalyzer:
                     'key': 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4',
                 }],
-                'ffmpeg_location': 'ffmpeg',  # Use system ffmpeg
+                'ffmpeg_location': self.ffmpeg_path,  # Use found ffmpeg path
                 'merge_output_format': 'mp4',
                 'verbose': True  # Enable verbose output for debugging
             }
@@ -258,7 +287,7 @@ class AccentAnalyzer:
         duration_sec = 60
         audio_path = video_path.rsplit('.', 1)[0] + ".wav"
         command = [
-            'ffmpeg',
+            self.ffmpeg_path,
             '-y',
             '-i', video_path,
             '-t', str(duration_sec),  # only first N seconds
@@ -266,8 +295,12 @@ class AccentAnalyzer:
             '-ar', '16000',
             audio_path
         ]
-        subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        return audio_path
+        try:
+            subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            return audio_path
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg error: {e.stderr.decode()}")
+            raise Exception(f"Error extracting audio: {str(e)}")
 
     def get_transcription(self, audio_path):
         """Get transcription using Whisper."""
