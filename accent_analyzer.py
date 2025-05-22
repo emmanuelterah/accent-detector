@@ -13,6 +13,7 @@ import glob
 import re
 import gdown
 import requests
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -179,63 +180,77 @@ class AccentAnalyzer:
             logger.error(f"Error listing formats: {str(e)}")
             return []
 
-    def download_video(self, url):
-        """Download video using yt-dlp or gdown."""
+    def download_video(self, url: str) -> str:
+        """Download video from URL (YouTube or Google Drive) and return local path."""
         try:
-            if self.is_google_drive_url(url):
-                return self.download_google_drive_video(url)
+            # Create temp directory if it doesn't exist
+            os.makedirs(self.temp_dir, exist_ok=True)
             
-            # Use yt-dlp for other URLs
-            temp_dir = tempfile.mkdtemp()
+            # Generate a unique filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = os.path.join(self.temp_dir, f"video_{timestamp}.mp4")
+            
+            # Check if it's a Google Drive URL
+            if self.is_google_drive_url(url):
+                file_id = self.get_google_drive_file_id(url)
+                if not file_id:
+                    raise ValueError("Invalid Google Drive URL")
+                
+                # Download using gdown
+                output = gdown.download(
+                    f"https://drive.google.com/uc?id={file_id}",
+                    output_path,
+                    quiet=False
+                )
+                
+                if output is None:
+                    raise Exception("Failed to download from Google Drive")
+                
+                return output_path
+            
+            # For YouTube URLs, use yt-dlp with specific format
             ydl_opts = {
-                'format': '232+233',  # 1280x720 video + audio
-                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                'format': 'best[ext=mp4]/best',  # Prefer MP4 format
+                'outtmpl': output_path,
                 'quiet': True,
                 'no_warnings': True,
-                'extract_flat': False,
-                'merge_output_format': 'mp4',
                 'postprocessors': [{
                     'key': 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4',
-                }]
+                }],
+                'ffmpeg_location': 'ffmpeg',  # Use system ffmpeg
+                'merge_output_format': 'mp4',
+                'verbose': True  # Enable verbose output for debugging
             }
             
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # First get video info
+                    # First try to get video info
                     info = ydl.extract_info(url, download=False)
-                    if not info:
-                        raise Exception("Could not extract video information")
+                    logger.info(f"Available formats: {[f['format_id'] for f in info['formats']]}")
                     
-                    # Then download
+                    # Download the video
                     ydl.download([url])
                     
-                    # Find the downloaded file
-                    downloaded_files = glob.glob(os.path.join(temp_dir, f"{info['title']}.*"))
-                    if not downloaded_files:
-                        # Try finding any video file in the temp directory
-                        downloaded_files = glob.glob(os.path.join(temp_dir, "*.*"))
-                        if not downloaded_files:
-                            raise Exception("No video file was downloaded")
-                    
-                    video_path = downloaded_files[0]
-                    logger.info(f"Successfully downloaded video to: {video_path}")
-                    return video_path
-                    
+                    # Verify the file was downloaded
+                    if os.path.exists(output_path):
+                        logger.info(f"Successfully downloaded video to {output_path}")
+                        return output_path
+                    else:
+                        raise Exception("Video file not found after download")
+                        
             except Exception as e:
-                logger.error(f"yt-dlp download failed: {str(e)}")
+                logger.error(f"Error downloading video: {str(e)}")
                 # Try alternative format if first attempt fails
-                ydl_opts['format'] = '231+233'  # 854x480 video + audio
+                ydl_opts['format'] = 'best'
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    downloaded_files = glob.glob(os.path.join(temp_dir, "*.*"))
-                    if not downloaded_files:
-                        raise Exception("Failed to download video after retry")
-                    video_path = downloaded_files[0]
-                    logger.info(f"Successfully downloaded video (retry) to: {video_path}")
-                    return video_path
-
+                    ydl.download([url])
+                    if os.path.exists(output_path):
+                        return output_path
+                    raise Exception(f"Failed to download video after retry: {str(e)}")
+                    
         except Exception as e:
+            logger.error(f"Error in download_video: {str(e)}")
             raise Exception(f"Error downloading video: {str(e)}")
 
     def extract_audio(self, video_path):
