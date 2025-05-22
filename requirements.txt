@@ -1,0 +1,15 @@
+streamlit
+pydub
+faster-whisper
+numpy
+scikit-learn
+xgboost
+python-dotenv
+requests
+transformers
+datasets
+soundfile
+librosa
+torch
+yt-dlp
+gdown 
