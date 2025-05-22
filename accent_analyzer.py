@@ -1,22 +1,18 @@
 import os
 import tempfile
-import requests
 import numpy as np
-from faster_whisper import WhisperModel
-from pathlib import Path
+import torch
+import yt_dlp
+import subprocess
+import logging
+from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
 import soundfile as sf
 import librosa
-from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
-import torch
-from pydub import AudioSegment
-import io
+from faster_whisper import WhisperModel
+import glob
 import re
-import subprocess
-import shutil
 import gdown
-import gc
-import sys
-import logging
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,14 +35,14 @@ class AccentAnalyzer:
         if not self._initialized:
             try:
                 # Set device
-                self.device = torch.device("cpu")
+                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 logger.info(f"Using device: {self.device}")
                 
                 # Initialize models
                 self._initialize_models()
                 
                 # Set accent labels
-                self.accent_labels = ['British', 'American', 'Australian', 'Other']
+                self.accent_labels = ['British', 'American', 'Australian', 'Indian', 'Other']
                 
                 self._initialized = True
                 logger.info("AccentAnalyzer initialized successfully")
@@ -67,9 +63,9 @@ class AccentAnalyzer:
                 download_root=MODEL_CACHE_DIR
             )
             
-            # Initialize WavLM model and feature extractor
-            logger.info("Initializing WavLM model...")
-            self.model_name = "microsoft/wavlm-base"
+            # Initialize accent classification model
+            logger.info("Initializing accent classification model...")
+            self.model_name = "dima806/english_accents_classification"
             
             # Load feature extractor
             self.feature_extractor = AutoFeatureExtractor.from_pretrained(
@@ -77,10 +73,10 @@ class AccentAnalyzer:
                 cache_dir=MODEL_CACHE_DIR
             )
             
-            # Load model
+            # Load model with correct number of labels (5 instead of 4)
             self.model = AutoModelForAudioClassification.from_pretrained(
                 self.model_name,
-                num_labels=4,
+                num_labels=5,  # Model has 5 classes
                 ignore_mismatched_sizes=True,
                 cache_dir=MODEL_CACHE_DIR
             )
@@ -88,6 +84,9 @@ class AccentAnalyzer:
             # Move model to device and set to eval mode
             self.model = self.model.to(self.device)
             self.model.eval()
+            
+            # Update accent labels to match model's classes
+            self.accent_labels = ['British', 'American', 'Australian', 'Indian', 'Other']
             
             logger.info("Models initialized successfully")
             
@@ -106,7 +105,7 @@ class AccentAnalyzer:
             if hasattr(self, 'feature_extractor'):
                 del self.feature_extractor
             
-            gc.collect()
+            torch.cuda.empty_cache()
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
 
@@ -158,84 +157,102 @@ class AccentAnalyzer:
                 os.unlink(temp_path)
             raise Exception(f"Error downloading from Google Drive: {str(e)}")
 
+    def list_available_formats(self, url):
+        """List available formats for a video URL."""
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    raise Exception("Could not extract video information")
+                
+                formats = info.get('formats', [])
+                logger.info("\nAvailable formats:")
+                for f in formats:
+                    logger.info(f"Format: {f.get('format_id')} - {f.get('ext')} - {f.get('format_note')} - {f.get('resolution')}")
+                return formats
+        except Exception as e:
+            logger.error(f"Error listing formats: {str(e)}")
+            return []
+
     def download_video(self, url):
-        """Download video from URL to temporary file."""
-        temp_path = None
+        """Download video using yt-dlp or gdown."""
         try:
             if self.is_google_drive_url(url):
                 return self.download_google_drive_video(url)
             
-            # First, check if the URL is accessible
-            head_response = requests.head(url, allow_redirects=True)
-            if head_response.status_code != 200:
-                raise Exception(f"URL is not accessible: {head_response.status_code}")
-
-            # Get content type
-            content_type = head_response.headers.get('content-type', '')
-            if not any(video_type in content_type.lower() for video_type in ['video', 'mp4', 'quicktime']):
-                raise Exception(f"URL does not point to a video file. Content-Type: {content_type}")
-
-            # Download the file
-            response = requests.get(url, stream=True)
-            if response.status_code != 200:
-                raise Exception(f"Failed to download video: {response.status_code}")
-
-            # Create a temporary file with .mp4 extension
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            temp_path = temp_file.name
-            temp_file.close()
-
-            # Download the file in chunks
-            with open(temp_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-
-            # Verify the file exists and has content
-            if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-                raise Exception("Downloaded file is empty or does not exist")
-
-            return temp_path
+            # Use yt-dlp for other URLs
+            temp_dir = tempfile.mkdtemp()
+            ydl_opts = {
+                'format': '232+233',  # 1280x720 video + audio
+                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'merge_output_format': 'mp4',
+                'postprocessors': [{
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                }]
+            }
+            
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # First get video info
+                    info = ydl.extract_info(url, download=False)
+                    if not info:
+                        raise Exception("Could not extract video information")
+                    
+                    # Then download
+                    ydl.download([url])
+                    
+                    # Find the downloaded file
+                    downloaded_files = glob.glob(os.path.join(temp_dir, f"{info['title']}.*"))
+                    if not downloaded_files:
+                        # Try finding any video file in the temp directory
+                        downloaded_files = glob.glob(os.path.join(temp_dir, "*.*"))
+                        if not downloaded_files:
+                            raise Exception("No video file was downloaded")
+                    
+                    video_path = downloaded_files[0]
+                    logger.info(f"Successfully downloaded video to: {video_path}")
+                    return video_path
+                    
+            except Exception as e:
+                logger.error(f"yt-dlp download failed: {str(e)}")
+                # Try alternative format if first attempt fails
+                ydl_opts['format'] = '231+233'  # 854x480 video + audio
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    downloaded_files = glob.glob(os.path.join(temp_dir, "*.*"))
+                    if not downloaded_files:
+                        raise Exception("Failed to download video after retry")
+                    video_path = downloaded_files[0]
+                    logger.info(f"Successfully downloaded video (retry) to: {video_path}")
+                    return video_path
 
         except Exception as e:
-            if temp_path and os.path.exists(temp_path):
-                os.unlink(temp_path)
             raise Exception(f"Error downloading video: {str(e)}")
 
     def extract_audio(self, video_path):
-        """Extract audio from video file using pydub."""
-        audio_path = None
-        try:
-            # Verify the video file exists and has content
-            if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
-                raise Exception("Video file is empty or does not exist")
-
-            # Create audio path
-            audio_path = video_path.replace('.mp4', '.wav')
-
-            try:
-                # Load video and extract audio
-                video = AudioSegment.from_file(video_path)
-                
-                # Convert to mono and set sample rate
-                audio = video.set_channels(1).set_frame_rate(16000)
-                
-                # Export as WAV
-                audio.export(audio_path, format="wav")
-                
-            except Exception as e:
-                raise Exception(f"Error extracting audio: {str(e)}")
-
-            # Verify the audio file was created
-            if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
-                raise Exception("Failed to create audio file")
-
-            return audio_path
-
-        except Exception as e:
-            if audio_path and os.path.exists(audio_path):
-                os.unlink(audio_path)
-            raise Exception(f"Error processing video: {str(e)}")
+        """Extract first 60 seconds of audio using ffmpeg."""
+        duration_sec = 60
+        audio_path = video_path.rsplit('.', 1)[0] + ".wav"
+        command = [
+            'ffmpeg',
+            '-y',
+            '-i', video_path,
+            '-t', str(duration_sec),  # only first N seconds
+            '-ac', '1',
+            '-ar', '16000',
+            audio_path
+        ]
+        subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        return audio_path
 
     def get_transcription(self, audio_path):
         """Get transcription using Whisper."""
@@ -246,7 +263,7 @@ class AccentAnalyzer:
             raise Exception(f"Error getting transcription: {str(e)}")
 
     def preprocess_audio(self, audio_path):
-        """Preprocess audio for the model using librosa."""
+        """Preprocess audio for the model."""
         try:
             # Load audio file using librosa
             waveform, sample_rate = librosa.load(audio_path, sr=16000, mono=True)
@@ -255,10 +272,16 @@ class AccentAnalyzer:
             inputs = self.feature_extractor(
                 waveform,
                 sampling_rate=16000,
-                return_tensors="pt"
+                return_tensors="pt",
+                padding=True,
+                max_length=16000 * 60,  # Process up to 60 seconds
+                truncation=True
             )
             
-            return inputs.to(self.device)
+            # Convert inputs to the same dtype as the model
+            inputs = {k: v.to(dtype=torch.float32, device=self.device) for k, v in inputs.items()}
+            
+            return inputs
 
         except Exception as e:
             raise Exception(f"Error preprocessing audio: {str(e)}")
@@ -270,6 +293,7 @@ class AccentAnalyzer:
             
             # Run inference
             with torch.no_grad():
+                self.model.eval()  # Ensure model is in eval mode
                 outputs = self.model(**inputs)
                 logits = outputs.logits
                 probabilities = torch.nn.functional.softmax(logits, dim=-1)
