@@ -4,6 +4,13 @@ import sys
 from pathlib import Path
 import logging
 import base64
+import asyncio
+
+# Fix for Streamlit event loop
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
