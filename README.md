@@ -5,7 +5,8 @@ A powerful web application that analyzes accents in videos using advanced machin
 ## ✨ Features
 
 - **Video Processing**
-  - Supports YouTube and Google Drive video URLs
+  - Supports Loom and Google Drive video URLs publicly
+  - Supports Youtube but only on local setup due to YouTube's strict measures.
   - Automatic video downloading and audio extraction
   - Smart format selection for optimal quality
 
@@ -79,7 +80,7 @@ A powerful web application that analyzes accents in videos using advanced machin
 
 2. Open your web browser and navigate to the provided URL (typically http://localhost:8501)
 
-3. Enter a video URL (YouTube or Google Drive) in the input field
+3. Enter a video URL (Loom, YouTube or Google Drive) in the input field
 
 4. Click "Analyze Accent" and wait for the results
 

@@ -174,9 +174,9 @@ def main():
 
         # Input for video URL
         url = st.text_input(
-            "Enter video URL (Google Drive or direct MP4 link):",
+            "Enter video URL (Loom, Google Drive or direct MP4 link):",
             label_visibility="visible",
-            help="Supported formats: Google Drive or direct MP4 links"
+            help="Supported formats: Loom, Google Drive or direct MP4 links"
         )
 
         if st.button("Analyze Accent", type="primary"):
