@@ -89,6 +89,10 @@ A powerful web application that analyzes accents in videos using advanced machin
    - Full transcription
    - Detailed explanation
 
+## 🌐 Public Access
+
+The application is publicly accessible at: [http://104.131.51.248:8501/](http://104.131.51.248:8501/)
+
 ## 🔧 Configuration
 
 The application uses several configuration parameters that can be modified in the code:
@@ -120,7 +124,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [Streamlit](https://streamlit.io/) for the web interface
 - [Hugging Face](https://huggingface.co/) for the accent classification model
 
-## �� Deployment Options
+## 🎏 Deployment Options
 
 ### 1. Cloud Deployment (Recommended)
 
