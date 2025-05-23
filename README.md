@@ -50,7 +50,7 @@ A powerful web application that analyzes accents in videos using advanced machin
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/accent-detector.git
+   git clone https://github.com/emmanuelterah/accent-detector.git
    cd accent-detector
    ```
 
@@ -128,7 +128,27 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ### 1. Cloud Deployment (Recommended)
 
-#### A. Google Cloud Platform (GCP)
+#### A. DigitalOcean (Current Deployment)
+- **Current Droplet Specifications**:
+  - RAM: 4GB
+  - vCPUs: 2
+  - Storage: 80GB SSD
+  - Region: NYC3
+- **Why DigitalOcean**:
+  - Cost-effective for ML applications
+  - Simple and straightforward deployment
+  - Excellent performance for Python applications
+  - Built-in monitoring and analytics
+  - Easy scaling options
+  - Reliable uptime and performance
+  - Great documentation and community support
+- **Current Performance**:
+  - Handles multiple concurrent users
+  - Stable processing of video analysis
+  - Efficient resource utilization
+  - Quick response times
+
+#### B. Google Cloud Platform (GCP)
 - **Recommended Instance**: 
   - Compute Engine: n1-standard-4 or better
   - GPU: NVIDIA T4 or better
@@ -139,7 +159,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
   - Global CDN
   - Cost-effective for production
 
-#### B. AWS
+#### C. AWS
 - **Recommended Instance**:
   - EC2: g4dn.xlarge or better
   - GPU: NVIDIA T4
