@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  accent-analyzer:
+    build: .
+    container_name: accent-analyzer
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./model_cache:/app/model_cache
+      - ./temp:/app/temp
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - MODEL_CACHE_DIR=/app/model_cache
+      - TEMP_DIR=/app/temp
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3 
